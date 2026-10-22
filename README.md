@@ -19,7 +19,7 @@ streamlit run app.py
 
 Optional settings (environment or secrets):
 
-- `OPENAI_MODEL` (default `gpt-4.1`)
+- `OPENAI_MODEL` (default `gpt-5.6-sol`)
 - `OPENAI_BASE_URL`, for any OpenAI-compatible server that supports JSON-schema structured outputs
 
 ## Lexicon
@@ -35,7 +35,7 @@ Descriptors and their allowed values are read from `lexicon/Descriptors_V.1.0.2.
   "annotator": "…",
   "download_date": "2026-10-22T10:30:57+00:00",
   "lexicon_version": "V.1.0.2",
-  "model": "gpt-4.1",
+  "model": "gpt-5.6-sol",
   "report": {"file_name": "…", "text": "…"},
   "exam_level": [{"modality": "Mammography", "descriptors": {"breast_composition": "scattered_fibroglandular", "…": null}}],
   "findings": [{"id": 1, "modality": "Ultrasound", "evidence": ["…"], "descriptors": {"mass_shape": "round", "…": null}}]

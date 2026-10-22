@@ -51,7 +51,7 @@ def extractor():
     api_key = setting("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is not set (environment variable or .streamlit/secrets.toml).")
-    return get_extractor(api_key, setting("OPENAI_MODEL", "gpt-4.1"), setting("OPENAI_BASE_URL"))
+    return get_extractor(api_key, setting("OPENAI_MODEL", "gpt-5.6-sol"), setting("OPENAI_BASE_URL"))
 
 
 # ---------- state ----------
