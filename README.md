@@ -7,7 +7,7 @@ Streamlit app to annotate breast imaging reports with the ACR BI-RADS lexicon.
   - **Exam level:** one block per modality in the report, for statements about the breasts or the exam as a whole, including negative statements (e.g. "No axillary lymphadenopathy" → `lymph_node_axillary = normal`).
   - **Findings:** each finding has a modality and its descriptors. Changing a finding's modality re-extracts that finding's descriptors for the new modality.
 - Every value can be corrected. Descriptors not stated in the report are left empty (`null`, or `[]` for multi-value descriptors).
-- Enter your name, then **Download results (JSON)**.
+- Enter your name, optionally rename the output file, then **Download results (JSON)**.
 
 ## Run
 

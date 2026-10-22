@@ -18,7 +18,7 @@ PANEL_HEIGHT = 680
 MODALITY_COLORS = {
     "mammography": "#fde68a",
     "ultrasound": "#a5f3fc",
-    "mri": "#fecaca",
+    "mri": "#bbf7d0",
     "contrast_enhanced_mammography": "#ddd6fe",
 }
 
@@ -95,6 +95,19 @@ def load_report(uploaded):
     state.report = {"file_name": uploaded.name, "text": text.replace("\r\n", "\n"), "hash": digest}
     state.result = None
     state.rev += 1
+    state.output_name = f"{Path(uploaded.name).stem}_annotation"
+
+
+def clear_report():
+    state.report = None
+    state.result = None
+    state.rev += 1
+
+
+def output_file_name():
+    name = re.sub(r'[\\/:*?"<>|]+', "_", state.get("output_name", "").strip())
+    name = re.sub(r"\.json$", "", name, flags=re.IGNORECASE) or "annotation"
+    return f"{name}.json"
 
 
 def run_extraction():
@@ -113,8 +126,8 @@ def run_extraction():
     st.rerun()  # the report panel was already drawn without highlights
 
 
-def on_modality_change(finding):
-    new_modality = state[f"{state.rev}|modality|{finding['id']}"]
+def on_modality_change(finding, key):
+    new_modality = state.get(key, finding["modality"])
     if new_modality == finding["modality"]:
         return
     finding["modality"] = new_modality
@@ -252,9 +265,11 @@ report_col, annotation_col = st.columns(2, gap="large")
 
 with report_col:
     st.subheader("Report")
-    uploaded = st.file_uploader("Upload a report (.txt)", type=["txt"])
+    uploaded = st.file_uploader("Upload a report (.txt)", type=["txt"], accept_multiple_files=False)
     if uploaded is not None:
         load_report(uploaded)
+    elif state.report:
+        clear_report()
     with st.container(height=PANEL_HEIGHT, border=True):
         if state.report:
             findings = state.result["findings"] if state.result else []
@@ -264,17 +279,19 @@ with report_col:
 
 with annotation_col:
     st.subheader("BI-RADS descriptors")
-    action_col, download_col = st.columns(2)
-    with action_col:
-        label = "Re-extract" if state.result else "Extract descriptors"
-        if st.button(label, type="primary", disabled=not state.report, use_container_width=True):
-            run_extraction()
+    label = "Re-extract" if state.result else "Extract descriptors"
+    if st.button(label, type="primary", disabled=not state.report, use_container_width=True):
+        run_extraction()
+    name_col, download_col = st.columns([3, 2], vertical_alignment="bottom")
+    with name_col:
+        state.setdefault("output_name", "annotation")
+        st.text_input("Download file name", key="output_name", help="Saved as <name>.json")
     with download_col:
         ready = bool(state.result and annotator.strip())
         st.download_button(
             "Download results (JSON)",
             data=json.dumps(export_json(annotator.strip()), indent=2, ensure_ascii=False) if ready else "",
-            file_name=f"{Path(state.report['file_name']).stem}_annotation.json" if state.report else "annotation.json",
+            file_name=output_file_name(),
             mime="application/json",
             disabled=not ready,
             use_container_width=True,
@@ -316,7 +333,7 @@ with annotation_col:
                             key=modality_key,
                             format_func=lambda k: LEXICON[k].name,
                             on_change=on_modality_change,
-                            args=(finding,),
+                            args=(finding, modality_key),
                             help="Changing the modality re-extracts this finding's descriptors.",
                         )
                         if finding["error"]:
@@ -325,6 +342,6 @@ with annotation_col:
 
 logo_b64 = base64.b64encode(LOGO.read_bytes()).decode()
 st.markdown(
-    f'<div class="footer">Made with ❤️ by <img src="data:image/png;base64,{logo_b64}" alt="logo"></div>',
+    f'<div class="footer">Made with 🩵 by <img src="data:image/png;base64,{logo_b64}" alt="logo"></div>',
     unsafe_allow_html=True,
 )
