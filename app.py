@@ -342,6 +342,6 @@ with annotation_col:
 
 logo_b64 = base64.b64encode(LOGO.read_bytes()).decode()
 st.markdown(
-    f'<div class="footer">Made with 🩵 by <img src="data:image/png;base64,{logo_b64}" alt="logo"></div>',
+    f'<div class="footer">Made with ❤️ by <img src="data:image/png;base64,{logo_b64}" alt="logo"></div>',
     unsafe_allow_html=True,
 )
