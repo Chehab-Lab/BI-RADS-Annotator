@@ -303,7 +303,7 @@ def exam_widgets(modality_key, scope, defaults):
 
 def finding_widgets(modality_key, scope, defaults):
     modality = LEXICON[modality_key]
-    st.markdown("**Finding type**")
+    st.markdown("**Descriptors**")
     pending = []  # consecutive plain descriptors, rendered together
     for item in [*modality.finding, None]:
         if isinstance(item, Group) or item is None:
@@ -322,17 +322,6 @@ def finding_widgets(modality_key, scope, defaults):
                 descriptor_grid(scope, item.members, defaults)
     st.markdown("**Characteristics**")
     descriptor_grid(scope, modality.characteristics, defaults)
-
-
-def finding_type(modality_key, values):
-    """Short label of what a finding is, from its ticked groups and filled Finding_type descriptors."""
-    labels = []
-    for item in LEXICON[modality_key].finding:
-        members = item.members if isinstance(item, Group) else (item,)
-        toggled = isinstance(item, Group) and item.toggle and values.get(item.toggle.variable)
-        if toggled or any(d.is_filled(values.get(d.variable)) for d in members):
-            labels.append(item.label)
-    return ", ".join(labels) if labels else "type not set"
 
 
 def filled_count(values):
@@ -431,10 +420,7 @@ with annotation_col:
                     scope = finding_scope(finding)
                     values = read_finding(finding["modality"], scope, finding["descriptors"])
                     name = LEXICON[finding["modality"]].name
-                    kind = finding_type(finding["modality"], values)
-                    with st.expander(
-                        f"F{finding['id']} · {name} · {kind} · {filled_count(values)} filled", expanded=True
-                    ):
+                    with st.expander(f"F{finding['id']} · {name} · {filled_count(values)} filled", expanded=True):
                         for excerpt in finding["evidence"]:
                             st.markdown(f'<div class="evidence">{html.escape(excerpt)}</div>', unsafe_allow_html=True)
                         modality_key = f"{state.rev}|modality|{finding['id']}"
