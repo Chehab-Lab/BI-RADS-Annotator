@@ -10,7 +10,7 @@ from pathlib import Path
 import streamlit as st
 
 from extraction import Extractor
-from lexicon import load_lexicon, lexicon_version
+from lexicon import Group, load_lexicon, lexicon_version
 
 ROOT = Path(__file__).parent
 LOGO = ROOT / "assets" / "logo.png"
@@ -70,12 +70,44 @@ def finding_scope(finding):
     return f"finding:{finding['id']}:{finding['modality']}:{finding['frev']}"
 
 
-def read_values(modality_key, scope, defaults):
-    """Current (possibly user-corrected) descriptor values of one block."""
+def current_value(scope, descriptor, defaults):
+    key = widget_key(scope, descriptor.variable)
+    return state[key] if key in state else defaults.get(descriptor.variable, descriptor.empty())
+
+
+def group_key(scope, group):
+    return widget_key(scope, group.toggle.variable if group.toggle else f"group:{group.key}")
+
+
+def group_on(scope, group, defaults):
+    key = group_key(scope, group)
+    if key in state:
+        return state[key]
+    if group.toggle:
+        return bool(defaults.get(group.toggle.variable))
+    return any(d.is_filled(defaults.get(d.variable, d.empty())) for d in group.members)
+
+
+def read_exam(modality_key, scope, defaults):
+    """Current (possibly user-corrected) exam-level values of one modality."""
+    return {d.variable: current_value(scope, d, defaults) for d in LEXICON[modality_key].exam}
+
+
+def read_finding(modality_key, scope, defaults):
+    """Current finding values; sub-descriptors of an unticked group are exported empty."""
+    modality = LEXICON[modality_key]
     values = {}
-    for d in LEXICON[modality_key].descriptors:
-        key = widget_key(scope, d.variable)
-        values[d.variable] = state[key] if key in state else defaults.get(d.variable, d.empty())
+    for item in modality.finding:
+        if isinstance(item, Group):
+            on = group_on(scope, item, defaults)
+            if item.toggle:
+                values[item.toggle.variable] = on
+            for d in item.members:
+                values[d.variable] = current_value(scope, d, defaults) if on else d.empty()
+        else:
+            values[item.variable] = current_value(scope, item, defaults)
+    for d in modality.characteristics:
+        values[d.variable] = current_value(scope, d, defaults)
     return values
 
 
@@ -138,7 +170,7 @@ def on_modality_change(finding, key):
             state.report["text"], finding["evidence"], new_modality
         )
     except Exception as error:
-        finding["descriptors"] = LEXICON[new_modality].empty()
+        finding["descriptors"] = {d.variable: d.empty() for d in LEXICON[new_modality].finding_descriptors()}
         finding["error"] = f"Re-extraction failed: {error}"
 
 
@@ -153,7 +185,7 @@ def export_json(annotator):
         "exam_level": [
             {
                 "modality": LEXICON[key].name,
-                "descriptors": read_values(key, f"exam:{key}", defaults),
+                "descriptors": read_exam(key, f"exam:{key}", defaults),
             }
             for key, defaults in result["exam_level"].items()
         ],
@@ -162,7 +194,7 @@ def export_json(annotator):
                 "id": f["id"],
                 "modality": LEXICON[f["modality"]].name,
                 "evidence": f["evidence"],
-                "descriptors": read_values(f["modality"], finding_scope(f), f["descriptors"]),
+                "descriptors": read_finding(f["modality"], finding_scope(f), f["descriptors"]),
             }
             for f in result["findings"]
         ],
@@ -212,32 +244,64 @@ def fmt(value):
     return "—" if value is None else value
 
 
-def descriptor_widgets(modality_key, scope, defaults):
-    descriptors = LEXICON[modality_key].descriptors
-    columns = st.columns(2)
-    for i, d in enumerate(descriptors):
-        key = widget_key(scope, d.variable)
+def descriptor_widget(scope, d, defaults):
+    key = widget_key(scope, d.variable)
+    if key not in state:
         default = defaults.get(d.variable, d.empty())
-        with columns[i % 2]:
-            if d.numeric:
-                if key not in state:
-                    state[key] = default
-                st.number_input(
-                    d.label, key=key, min_value=0 if d.integer else 0.0, step=1 if d.integer else 0.1,
-                    format="%d" if d.integer else "%.1f", help=d.variable, placeholder="—",
-                )
-            elif d.multiple:
-                if key not in state:
-                    state[key] = list(default)
-                st.multiselect(d.label, d.values, key=key, help=d.variable, placeholder="—")
-            else:
-                if key not in state:
-                    state[key] = default
-                st.selectbox(d.label, [None, *d.values], key=key, format_func=fmt, help=d.variable, placeholder="—")
+        state[key] = list(default) if d.kind == "multi" else default
+    if d.kind == "bool":
+        st.checkbox(d.label, key=key, help=d.variable)
+    elif d.kind == "number":
+        st.number_input(
+            d.label, key=key, min_value=0 if d.integer else 0.0, step=1 if d.integer else 0.1,
+            format="%d" if d.integer else "%.1f", help=d.variable, placeholder="—",
+        )
+    elif d.kind == "multi":
+        st.multiselect(d.label, d.values, key=key, help=d.variable, placeholder="—")
+    else:
+        st.selectbox(d.label, [None, *d.values], key=key, format_func=fmt, help=d.variable, placeholder="—")
+
+
+def descriptor_grid(scope, descriptors, defaults):
+    """Value pickers in two columns, then checkboxes in three."""
+    for kinds, n in (({"one", "multi", "number"}, 2), ({"bool"}, 3)):
+        batch = [d for d in descriptors if d.kind in kinds]
+        if batch:
+            columns = st.columns(n)
+            for i, d in enumerate(batch):
+                with columns[i % n]:
+                    descriptor_widget(scope, d, defaults)
+
+
+def exam_widgets(modality_key, scope, defaults):
+    descriptor_grid(scope, LEXICON[modality_key].exam, defaults)
+
+
+def finding_widgets(modality_key, scope, defaults):
+    modality = LEXICON[modality_key]
+    st.markdown("**Finding type**")
+    pending = []  # consecutive plain descriptors, rendered together
+    for item in [*modality.finding, None]:
+        if isinstance(item, Group) or item is None:
+            descriptor_grid(scope, pending, defaults)
+            pending = []
+        else:
+            pending.append(item)
+            continue
+        if item is None:
+            break
+        key = group_key(scope, item)
+        if key not in state:
+            state[key] = group_on(scope, item, defaults)
+        if st.toggle(item.label, key=key, help=item.toggle.variable if item.toggle else None):
+            with st.container(border=True):
+                descriptor_grid(scope, item.members, defaults)
+    st.markdown("**Characteristics**")
+    descriptor_grid(scope, modality.characteristics, defaults)
 
 
 def filled_count(values):
-    return sum(1 for v in values.values() if v not in (None, []))
+    return sum(1 for v in values.values() if v not in (None, [], False))
 
 
 st.markdown(
@@ -296,8 +360,8 @@ with annotation_col:
             disabled=not ready,
             use_container_width=True,
         )
-    if state.result and not annotator.strip():
-        st.caption("Enter your name to enable the download.")
+    # always render the caption so later elements (the tabs) keep their identity across reruns
+    st.caption("Enter your name to enable the download." if state.result and not annotator.strip() else "&nbsp;")
 
     with st.container(height=PANEL_HEIGHT - 60, border=True):
         if not state.result:
@@ -311,15 +375,15 @@ with annotation_col:
                     st.caption("No modality-level descriptors were extracted.")
                 for key, defaults in state.result["exam_level"].items():
                     scope = f"exam:{key}"
-                    filled = filled_count(read_values(key, scope, defaults))
+                    filled = filled_count(read_exam(key, scope, defaults))
                     with st.expander(f"{LEXICON[key].name} · {filled} filled", expanded=True):
-                        descriptor_widgets(key, scope, defaults)
+                        exam_widgets(key, scope, defaults)
             with findings_tab:
                 if not state.result["findings"]:
                     st.caption("No findings were extracted.")
                 for finding in state.result["findings"]:
                     scope = finding_scope(finding)
-                    filled = filled_count(read_values(finding["modality"], scope, finding["descriptors"]))
+                    filled = filled_count(read_finding(finding["modality"], scope, finding["descriptors"]))
                     name = LEXICON[finding["modality"]].name
                     with st.expander(f"F{finding['id']} · {name} · {filled} filled", expanded=True):
                         for excerpt in finding["evidence"]:
@@ -338,7 +402,7 @@ with annotation_col:
                         )
                         if finding["error"]:
                             st.error(finding["error"])
-                        descriptor_widgets(finding["modality"], scope, finding["descriptors"])
+                        finding_widgets(finding["modality"], scope, finding["descriptors"])
 
 logo_b64 = base64.b64encode(LOGO.read_bytes()).decode()
 st.markdown(
