@@ -113,6 +113,25 @@ def read_finding(modality_key, scope, defaults):
 
 # ---------- actions ----------
 
+_HEADER_LINE = re.compile(r"^(?P<key>[A-Za-z_][\w ]*):\s*(?P<value>.*)$")
+
+
+def split_header(text):
+    """Split an optional metadata header ("---" / "key: value" lines / "---") from the report text."""
+    lines = text.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return {}, text
+    metadata = {}
+    for i, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            return metadata, "\n".join(lines[i + 1:]).strip("\n")
+        match = _HEADER_LINE.match(line.strip())
+        if not match:
+            break
+        metadata[match["key"].strip()] = match["value"].strip()
+    return {}, text
+
+
 def load_report(uploaded):
     raw = uploaded.getvalue()
     digest = hashlib.sha256(raw).hexdigest()
@@ -124,7 +143,8 @@ def load_report(uploaded):
             break
         except UnicodeDecodeError:
             continue
-    state.report = {"file_name": uploaded.name, "text": text.replace("\r\n", "\n"), "hash": digest}
+    metadata, body = split_header(text.replace("\r\n", "\n"))
+    state.report = {"file_name": uploaded.name, "metadata": metadata, "text": body, "hash": digest}
     state.result = None
     state.rev += 1
     state.output_name = f"{Path(uploaded.name).stem}_annotation"
@@ -181,7 +201,11 @@ def export_json(annotator):
         "download_date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "lexicon_version": lexicon_version(),
         "model": result["model"],
-        "report": {"file_name": state.report["file_name"], "text": state.report["text"]},
+        "report": {
+            "file_name": state.report["file_name"],
+            "metadata": state.report["metadata"],
+            "text": state.report["text"],
+        },
         "exam_level": [
             {
                 "modality": LEXICON[key].name,
@@ -311,6 +335,8 @@ st.markdown(
     .report mark { border-radius: 3px; padding: 0 1px; color: inherit; }
     .report .badge { font-family: ui-sans-serif, system-ui; font-size: 0.65rem; font-weight: 700;
                      background: #1f2937; color: #fff; border-radius: 4px; padding: 0 3px; margin-right: 2px; }
+    .metadata { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.8rem; opacity: 0.8;
+                padding-bottom: 8px; border-bottom: 1px solid rgba(128, 128, 128, 0.3); }
     .evidence { border-left: 3px solid #9ca3af; padding: 2px 8px; margin: 2px 0 6px; font-style: italic; opacity: 0.9; }
     .footer { text-align: center; margin-top: 2rem; opacity: 0.85; font-size: 0.95rem; }
     .footer img { height: 32px; vertical-align: middle; margin-left: 6px; }
@@ -336,6 +362,15 @@ with report_col:
         clear_report()
     with st.container(height=PANEL_HEIGHT, border=True):
         if state.report:
+            if state.report["metadata"]:
+                st.html(
+                    '<div class="metadata">'
+                    + "".join(
+                        f"<span><b>{html.escape(k)}</b> {html.escape(v)}</span>"
+                        for k, v in state.report["metadata"].items()
+                    )
+                    + "</div>"
+                )
             findings = state.result["findings"] if state.result else []
             st.html(report_html(state.report["text"], findings))
         else:
