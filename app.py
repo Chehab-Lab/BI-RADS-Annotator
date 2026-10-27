@@ -324,6 +324,17 @@ def finding_widgets(modality_key, scope, defaults):
     descriptor_grid(scope, modality.characteristics, defaults)
 
 
+def finding_type(modality_key, values):
+    """Short label of what a finding is, from its ticked groups and filled Finding_type descriptors."""
+    labels = []
+    for item in LEXICON[modality_key].finding:
+        members = item.members if isinstance(item, Group) else (item,)
+        toggled = isinstance(item, Group) and item.toggle and values.get(item.toggle.variable)
+        if toggled or any(d.is_filled(values.get(d.variable)) for d in members):
+            labels.append(item.label)
+    return ", ".join(labels) if labels else "type not set"
+
+
 def filled_count(values):
     return sum(1 for v in values.values() if v not in (None, [], False))
 
@@ -418,9 +429,12 @@ with annotation_col:
                     st.caption("No findings were extracted.")
                 for finding in state.result["findings"]:
                     scope = finding_scope(finding)
-                    filled = filled_count(read_finding(finding["modality"], scope, finding["descriptors"]))
+                    values = read_finding(finding["modality"], scope, finding["descriptors"])
                     name = LEXICON[finding["modality"]].name
-                    with st.expander(f"F{finding['id']} · {name} · {filled} filled", expanded=True):
+                    kind = finding_type(finding["modality"], values)
+                    with st.expander(
+                        f"F{finding['id']} · {name} · {kind} · {filled_count(values)} filled", expanded=True
+                    ):
                         for excerpt in finding["evidence"]:
                             st.markdown(f'<div class="evidence">{html.escape(excerpt)}</div>', unsafe_allow_html=True)
                         modality_key = f"{state.rev}|modality|{finding['id']}"

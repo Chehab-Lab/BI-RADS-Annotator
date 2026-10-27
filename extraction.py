@@ -15,9 +15,15 @@ given below. For each modality the lexicon lists Exam_level descriptors, Finding
 Characteristics (location of a finding).
 
 Findings:
-- A finding is one Finding_type item that is present in one imaging modality. Create a separate finding for each \
-item: e.g. a mass with skin thickening is two findings, one for the mass and one for the skin thickening. \
+- Extract EVERY abnormality, lesion or positive observation described in the current imaging (masses, opacities, \
+nodules, foci, calcifications, asymmetries, cysts, duct changes, skin changes, lymph nodes, enhancements, ...). \
+Do not skip any; completeness matters as much as accuracy.
+- A finding is one abnormality in one imaging modality. When it matches Finding_type items, create a separate finding \
+for each item: e.g. a mass with skin thickening is two findings, one for the mass and one for the skin thickening. \
 Indented descriptors belong to the item above them (e.g. mass shape and margin are part of the mass finding).
+- If an abnormality cannot be mapped to any Finding_type item with certainty (e.g. unspecified "foci" or a "slight \
+over-opacity"), still create the finding: leave its Finding_type descriptors empty (false for Bool) and fill only \
+what is stated, such as its Characteristics.
 - If the same lesion is described in several modalities, create one finding per modality.
 - If one sentence describes several distinct lesions, create one finding per lesion.
 - Fill the Characteristics (laterality, location, depth, distance from nipple, ...) of each finding from its own text.
@@ -43,7 +49,7 @@ assessment_category of the modalities it names.
 - Only use the allowed values. Map wording to a lexicon value only when the meaning is explicitly the same; do not add \
 qualifiers the report does not state (e.g. "peripheral vascularization" is not "peripheral hypervascularity").
 - Do not infer a lesion type the report does not name (e.g. unspecified "foci" or "opacities" are not calcifications \
-or masses unless stated).
+or masses unless stated). This only limits the descriptors: the finding itself must still be extracted.
 - If the wording is ambiguous, contradictory, or would need clinical interpretation, leave the descriptor empty.
 - Leave a descriptor empty (null, [] for lists, false for Bool) when the report does not state it. Never guess.
 - Ignore information about prior exams and pathology results; only annotate the current imaging.
