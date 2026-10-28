@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-LEXICON_FILE = Path(__file__).parent / "lexicon" / "Descriptors_V.1.2.md"
+LEXICON_FILE = Path(__file__).parent / "lexicon" / "Descriptors_V.1.3.md"
 
 _MODALITY = re.compile(r"^##\s+(?P<name>[^#].*?)\s*$")
 _SECTION = re.compile(r"^\s*#{3,4}\s*(?P<name>\w+)")

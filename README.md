@@ -35,7 +35,7 @@ Optional settings (environment or secrets):
 
 ## Lexicon
 
-Descriptors and their allowed values are read from `lexicon/Descriptors_V.1.2.md`. To change the lexicon, edit that file, keeping its structure (`## Modality`, `### Exam_level:`, `### Finding_type:`, `#### Characteristics`) and line format:
+Descriptors and their allowed values are read from `lexicon/Descriptors_V.1.3.md`. To change the lexicon, edit that file, keeping its structure (`## Modality`, `### Exam_level:`, `### Finding_type:`, `#### Characteristics`) and line format:
 
     - Label — `variable` (one | multi | Bool): value_a, value_b, ...
         Sub-descriptor — `variable` (one | multi): ...   (indented under a Bool group)
@@ -48,7 +48,7 @@ Groups without a variable name (e.g. ultrasound "Masses — (Bool)") are shown a
 {
   "annotator": "…",
   "download_date": "2026-10-22T10:30:57+00:00",
-  "lexicon_version": "V.1.2",
+  "lexicon_version": "V.1.3",
   "model": "gpt-5.6-sol",
   "report": {"file_name": "…", "metadata": {"id": "…", "country": "…"}, "text": "…"},
   "exam_level": [{"modality": "Mammography", "descriptors": {"breast_composition": "scattered_fibroglandular", "assessment_category": "2"}}],
