@@ -10,11 +10,11 @@ from pathlib import Path
 import streamlit as st
 
 from extraction import Extractor
-from lexicon import Group, load_lexicon, lexicon_version
+from lexicon import load_lexicon, lexicon_version
 
 ROOT = Path(__file__).parent
 LOGO = ROOT / "assets" / "logo.png"
-PANEL_HEIGHT = 720
+PANEL_HEIGHT = 760
 MODALITY_COLORS = {
     "mammography": "#fde68a",
     "ultrasound": "#a5f3fc",
@@ -64,7 +64,7 @@ state.setdefault("rev", 0)  # bumped on every full extraction so widgets reset
 
 # Streamlit forgets the value of a widget that is not drawn in a run, and only the selected finding is drawn.
 # Re-assigning the annotation values keeps them across navigation (buttons are excluded: they cannot be set).
-_KEEP = re.compile(r"\|(finding:|exam:|reviewed\||modality\|)")
+_KEEP = re.compile(r"\|(finding:|exam:|modality\|)")
 for _key in [k for k in state if isinstance(k, str) and k.startswith(f"{state.rev}|") and _KEEP.search(k)]:
     state[_key] = state[_key]
 
@@ -82,26 +82,9 @@ def nav_key():
     return f"{state.rev}|nav"
 
 
-def reviewed_key(finding):
-    return f"{state.rev}|reviewed|{finding['uid']}"
-
-
 def current_value(scope, descriptor, defaults):
     key = widget_key(scope, descriptor.variable)
     return state[key] if key in state else defaults.get(descriptor.variable, descriptor.empty())
-
-
-def group_key(scope, group):
-    return widget_key(scope, group.toggle.variable if group.toggle else f"group:{group.key}")
-
-
-def group_on(scope, group, defaults):
-    key = group_key(scope, group)
-    if key in state:
-        return state[key]
-    if group.toggle:
-        return bool(defaults.get(group.toggle.variable))
-    return any(d.is_filled(defaults.get(d.variable, d.empty())) for d in group.members)
 
 
 def read_exam(modality_key, scope, defaults):
@@ -110,21 +93,8 @@ def read_exam(modality_key, scope, defaults):
 
 
 def read_finding(modality_key, scope, defaults):
-    """Current finding values; sub-descriptors of an unticked group are exported empty."""
-    modality = LEXICON[modality_key]
-    values = {}
-    for item in modality.finding:
-        if isinstance(item, Group):
-            on = group_on(scope, item, defaults)
-            if item.toggle:
-                values[item.toggle.variable] = on
-            for d in item.members:
-                values[d.variable] = current_value(scope, d, defaults) if on else d.empty()
-        else:
-            values[item.variable] = current_value(scope, item, defaults)
-    for d in modality.characteristics:
-        values[d.variable] = current_value(scope, d, defaults)
-    return values
+    """Current finding values: every attribute of the modality, as shown."""
+    return {d.variable: current_value(scope, d, defaults) for d in LEXICON[modality_key].finding_descriptors()}
 
 
 # ---------- actions ----------
@@ -152,7 +122,7 @@ def load_report(uploaded):
     raw = uploaded.getvalue()
     digest = hashlib.sha256(raw).hexdigest()
     if state.report and state.report["hash"] == digest and state.report["file_name"] == uploaded.name:
-        return
+        return False
     for encoding in ("utf-8-sig", "cp1252", "latin-1"):
         try:
             text = raw.decode(encoding)
@@ -162,8 +132,11 @@ def load_report(uploaded):
     metadata, body = split_header(text.replace("\r\n", "\n"))
     state.report = {"file_name": uploaded.name, "metadata": metadata, "text": body, "hash": digest}
     state.result = None
+    state.extract_error = None
+    state.extract_pending = True  # extraction starts by itself after an upload
     state.rev += 1
-    state.output_name = f"{Path(uploaded.name).stem}_annotation"
+    state.next_output_name = f"{Path(uploaded.name).stem}_annotation"  # applied before the field is drawn
+    return True
 
 
 def clear_report():
@@ -184,8 +157,9 @@ def run_extraction():
             ex = extractor()
             result = ex.extract_report(state.report["text"])
     except Exception as error:
-        st.error(f"Extraction failed: {error}")
+        state.extract_error = f"Extraction failed: {error}"
         return
+    state.extract_error = None
     for i, finding in enumerate(result["findings"], start=1):
         finding.update(id=i, uid=i, frev=0, error=None)
     result["next_uid"] = len(result["findings"]) + 1
@@ -254,11 +228,6 @@ def add_finding(select_key, excerpt_key):
     state.result["findings"].append(finding)
     renumber_findings()
     go_to(f"f:{finding['uid']}")
-
-
-def review_and_next(finding, target):
-    state[reviewed_key(finding)] = True
-    go_to(target)
 
 
 def remove_exam(modality_key):
@@ -395,14 +364,14 @@ def descriptor_grid(scope, descriptors, defaults):
                     descriptor_widget(scope, d, defaults)
 
 
+
+
 def nav_label(option):
     if option == NAV_EXAM:
         return "Exam level"
     if option == NAV_ADD:
-        return ":material/add: Add"
-    finding = finding_by_nav(option)
-    check = ":material/check_circle: " if state.get(reviewed_key(finding)) else ""
-    return f"{check}F{finding['id']} · {LEXICON[finding['modality']].name}"
+        return ":material/add:"
+    return f"F{finding_by_nav(option)['id']}"
 
 
 def finding_by_nav(option):
@@ -410,122 +379,56 @@ def finding_by_nav(option):
     return next(f for f in state.result["findings"] if f["uid"] == uid)
 
 
-def confirm_delete(label, key, on_click, args):
-    """A delete action behind a small confirmation popover, to prevent accidental removals."""
-    with st.popover(label, icon=":material/delete:"):
-        st.caption("This cannot be undone.")
-        st.button("Delete", key=key, on_click=on_click, args=args, type="primary", use_container_width=True)
+def delete_button(key, on_click, args):
+    """A delete icon behind a small confirmation, to prevent accidental removals."""
+    with st.popover("", icon=":material/delete:", help="Delete"):
+        st.button("Delete", key=key, on_click=on_click, args=args, type="primary")
 
 
 def exam_view():
-    if not state.result["exam_level"]:
-        st.info("No exam-level descriptors were extracted. Add a modality below if the report has one.")
     for key in exam_modalities():
-        scope = f"exam:{key}"
-        with st.container(border=True):
-            head, action = st.columns([2.5, 1.2], vertical_alignment="center")
-            head.markdown(f"**{LEXICON[key].name}**")
-            with action:
-                confirm_delete("Remove", f"{state.rev}|remove-exam|{key}", remove_exam, (key,))
-            descriptor_grid(scope, LEXICON[key].exam, state.result["exam_level"][key])
+        head, action = st.columns([6, 1], vertical_alignment="center")
+        head.markdown(f"**{LEXICON[key].name}**")
+        with action:
+            delete_button(f"{state.rev}|remove-exam|{key}", remove_exam, (key,))
+        descriptor_grid(f"exam:{key}", LEXICON[key].exam, state.result["exam_level"][key])
+        st.divider()
     missing = [k for k in LEXICON if k not in state.result["exam_level"]]
-    footer = st.columns([1, 1], vertical_alignment="center")
     if missing:
-        with footer[0].popover("Add modality", icon=":material/add:"):
+        with st.popover("Add modality", icon=":material/add:"):
             select_key = f"{state.rev}|add-exam"
             st.selectbox("Modality", missing, key=select_key, format_func=lambda k: LEXICON[k].name)
             st.button("Add", key=f"{state.rev}|add-exam-button", on_click=add_exam, args=(select_key,),
-                      type="primary", use_container_width=True)
-    findings = state.result["findings"]
-    if findings:
-        footer[1].button(
-            "Review findings", key=f"{state.rev}|to-findings", icon=":material/arrow_forward:", type="primary",
-            on_click=go_to, args=(f"f:{findings[0]['uid']}",), use_container_width=True,
-        )
+                      type="primary")
 
 
 def finding_view(finding):
-    findings = state.result["findings"]
-    index = findings.index(finding)
-    modality = LEXICON[finding["modality"]]
     scope = finding_scope(finding)
-    defaults = finding["descriptors"]
-
-    head, reviewed = st.columns([2, 1], vertical_alignment="center")
-    head.markdown(f"#### F{finding['id']} <span class='muted'>of {len(findings)}</span>", unsafe_allow_html=True)
-    reviewed.toggle("Reviewed", key=reviewed_key(finding))
-
-    if finding["evidence"]:
-        for excerpt in finding["evidence"]:
-            st.markdown(f'<div class="evidence">{html.escape(excerpt)}</div>', unsafe_allow_html=True)
-    else:
-        st.caption("No report excerpt (added by hand).")
-
+    title, modality_col, action = st.columns([1, 5, 1], vertical_alignment="bottom")
+    title.markdown(f"### F{finding['id']}")
     modality_key = f"{state.rev}|modality|{finding['uid']}"
     if modality_key not in state:
         state[modality_key] = finding["modality"]
-    st.selectbox(
+    modality_col.selectbox(
         "Modality", list(LEXICON), key=modality_key, format_func=lambda k: LEXICON[k].name,
         on_change=on_modality_change, args=(finding, modality_key),
-        help="Changing the modality re-extracts this finding's descriptors.",
+        help="Changing the modality re-extracts this finding's attributes.",
     )
+    with action:
+        delete_button(f"{state.rev}|remove-finding|{finding['uid']}", remove_finding, (finding["uid"],))
+    for excerpt in finding["evidence"]:
+        st.markdown(f'<div class="evidence">{html.escape(excerpt)}</div>', unsafe_allow_html=True)
     if finding["error"]:
         st.error(finding["error"])
-
-    values = read_finding(finding["modality"], scope, defaults)
-    filled = [  # a one-line readout of what is filled, to check at a glance
-        f"{d.label}: {', '.join(map(humanize, v)) if isinstance(v, list) else 'yes' if v is True else humanize(v)}"
-        for d in modality.finding_descriptors()
-        if d.is_filled(v := values[d.variable])
-    ]
-    st.html('<div class="chips">' + ("".join(f'<span class="chip">{html.escape(c)}</span>' for c in filled)
-            or '<span class="chip">Nothing filled yet</span>') + "</div>")
-
-    st.markdown("**Descriptors**")
-    pending = []  # consecutive plain descriptors, rendered together
-    for item in [*modality.finding, None]:
-        if isinstance(item, Group) or item is None:
-            descriptor_grid(scope, pending, defaults)
-            pending = []
-        else:
-            pending.append(item)
-            continue
-        if item is None:
-            break
-        key = group_key(scope, item)
-        if key not in state:
-            state[key] = group_on(scope, item, defaults)
-        if st.toggle(item.label, key=key, help=item.toggle.variable if item.toggle else None):
-            with st.container(border=True):
-                descriptor_grid(scope, item.members, defaults)
-    st.markdown("**Characteristics**")
-    descriptor_grid(scope, modality.characteristics, defaults)
-
-    st.divider()
-    previous = f"f:{findings[index - 1]['uid']}" if index > 0 else NAV_EXAM
-    following = f"f:{findings[index + 1]['uid']}" if index + 1 < len(findings) else None
-    delete, back, forward = st.columns([1, 1, 1.7])
-    with delete:
-        confirm_delete("Delete", f"{state.rev}|remove-finding|{finding['uid']}", remove_finding, (finding["uid"],))
-    back.button(
-        "Previous", key=f"{state.rev}|prev|{finding['uid']}", icon=":material/arrow_back:",
-        on_click=go_to, args=(previous,), use_container_width=True,
-    )
-    forward.button(
-        "Mark reviewed & next" if following else "Mark reviewed",
-        key=f"{state.rev}|next|{finding['uid']}", icon=":material/check:", type="primary",
-        on_click=review_and_next, args=(finding, following or f"f:{finding['uid']}"), use_container_width=True,
-    )
+    descriptor_grid(scope, LEXICON[finding["modality"]].finding_descriptors(), finding["descriptors"])
 
 
 def add_view():
-    st.markdown("#### Add a finding")
-    st.caption("Use this for a finding the model missed.")
     modality_key, excerpt_key = f"{state.rev}|add-finding-modality", f"{state.rev}|add-finding-excerpt"
     st.selectbox("Modality", list(LEXICON), key=modality_key, format_func=lambda k: LEXICON[k].name)
     st.text_area(
         "Report excerpt (optional)", key=excerpt_key, height=100,
-        placeholder="Paste the sentence it is based on: it will be highlighted and its descriptors pre-filled",
+        placeholder="Paste the sentence it is based on: it will be highlighted and its attributes pre-filled",
     )
     st.button("Add finding", key=f"{state.rev}|add-finding-button", icon=":material/add:", type="primary",
               on_click=add_finding, args=(modality_key, excerpt_key))
@@ -534,144 +437,108 @@ def add_view():
 st.markdown(
     """
     <style>
-    .block-container { padding-top: 3.2rem; }
+    .block-container { padding-top: 2.5rem; }
     [data-testid="stButtonGroup"] > div { flex-wrap: wrap; row-gap: 6px; overflow-x: visible; }
     .report { white-space: pre-wrap; font-family: ui-serif, Georgia, serif; font-size: 1rem; line-height: 1.75; }
-    .report mark { border-radius: 4px; padding: 1px 2px; color: inherit; transition: opacity .15s; }
+    .report mark { border-radius: 4px; padding: 1px 2px; color: inherit; }
     .report mark.dim { opacity: 0.45; }
     .report mark.sel { box-shadow: 0 0 0 2px #0e9aa7; }
     .report .badge { font-family: ui-sans-serif, system-ui; font-size: 0.65rem; font-weight: 700;
                      background: #6b7280; color: #fff; border-radius: 4px; padding: 0 4px; margin-right: 2px; }
     .report .badge.sel { background: #0e9aa7; }
-    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; font-size: 0.78rem; }
-    .chip { border-radius: 999px; padding: 1px 10px; background: rgba(128, 128, 128, 0.12); }
-    .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.78rem; opacity: 0.8; margin-top: 6px; }
-    .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
+    .metadata { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.8rem; opacity: 0.75;
+                padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid rgba(128, 128, 128, 0.3); }
     .evidence { border-left: 3px solid #0e9aa7; padding: 4px 10px; margin: 0 0 10px; font-style: italic;
                 background: rgba(14, 154, 167, 0.06); border-radius: 0 6px 6px 0; }
-    .muted { opacity: 0.55; font-weight: 400; font-size: 0.9rem; }
-    .step { font-size: 0.72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
-            opacity: 0.6; margin: 0.4rem 0 -0.3rem; }
-    .footer { text-align: center; opacity: 0.8; font-size: 0.85rem; }
-    .footer img { height: 26px; vertical-align: middle; margin-left: 6px; }
+    .footer { opacity: 0.8; font-size: 0.85rem; }
+    .footer img { height: 22px; vertical-align: middle; margin-left: 4px; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
+# ---------- title, download and settings ----------
 
-def step(number, title):
-    st.markdown(f'<div class="step">{number} · {title}</div>', unsafe_allow_html=True)
-
-
-# ---------- sidebar: the workflow, one step after the other ----------
-
-with st.sidebar:
-    st.markdown("## BI-RADS Annotator")
-    step(1, "Report")
-    uploaded = st.file_uploader("Upload a report (.txt)", type=["txt"], accept_multiple_files=False)
-    if uploaded is not None:
-        load_report(uploaded)
-    elif state.report:
-        clear_report()
-
-    step(2, "Extract")
-    if st.button(
-        "Re-extract" if state.result else "Extract descriptors",
-        type="secondary" if state.result else "primary", disabled=not state.report,
-        icon=":material/auto_awesome:", use_container_width=True,
-        help="Re-extracting replaces all your corrections." if state.result else None,
-    ):
-        run_extraction()
-
-    step(3, "Review")
-    if state.result and state.result["findings"]:
-        done = sum(bool(state.get(reviewed_key(f))) for f in state.result["findings"])
-        total = len(state.result["findings"])
-        st.progress(done / total, text=f"{done} of {total} findings reviewed")
-    else:
-        st.caption("Check the exam level and each finding against the report.")
-
-    step(4, "Download")
-    annotator = st.text_input("Annotator name", key="annotator", placeholder="Your name")
-    state.setdefault("output_name", "annotation")
-    st.text_input("File name", key="output_name", help="Saved as <name>.json")
-    ready = bool(state.result and annotator.strip())
+annotator = state.get("annotator", "").strip()
+title_col, download_col, settings_col = st.columns([12, 1, 1], vertical_alignment="center")
+title_col.title("BI-RADS Annotator")
+with download_col:
+    ready = bool(state.result and annotator)
     st.download_button(
-        "Download JSON",
-        data=json.dumps(export_json(annotator.strip()), indent=2, ensure_ascii=False) if ready else "",
+        "",
+        data=json.dumps(export_json(annotator), indent=2, ensure_ascii=False) if ready else "",
         file_name=output_file_name(),
         mime="application/json",
         disabled=not ready,
-        type="primary" if ready else "secondary",
         icon=":material/download:",
-        use_container_width=True,
+        help="Download JSON" if ready else "Download JSON (enter your name in settings first)",
     )
-    if state.result and not annotator.strip():
-        st.caption("Enter your name to enable the download.")
-
-    logo_b64 = base64.b64encode(LOGO.read_bytes()).decode()
-    st.divider()
-    st.markdown(
-        f'<div class="footer">Made with ❤️ by <img src="data:image/png;base64,{logo_b64}" alt="logo"></div>',
-        unsafe_allow_html=True,
-    )
-
-
-# ---------- main: report and review side by side ----------
-
-if not state.report:
-    st.markdown("### Start by uploading a report")
-    st.caption(
-        "Upload a `.txt` report in the sidebar, then extract its BI-RADS descriptors. "
-        "You review the exam level and each finding next to the highlighted report, then download the JSON."
-    )
-    st.stop()
-
-nav = None
-if state.result:
-    findings = state.result["findings"]
-    options = [NAV_EXAM, *(f"f:{f['uid']}" for f in findings), NAV_ADD]
-    if state.get(nav_key()) is None and state.get("last_nav") in options:
-        state[nav_key()] = state.last_nav  # clicking the selected segment deselects it: keep it selected
-    if state.get(nav_key()) not in options:
-        state[nav_key()] = NAV_EXAM
-    nav = state.last_nav = state[nav_key()]
-
-selected = finding_by_nav(nav) if nav and nav.startswith("f:") else None
-report_col, review_col = st.columns([1, 1.1], gap="large")
-
-with report_col:
-    chips = [f"<b>{html.escape(state.report['file_name'])}</b>"] + [
-        f"{html.escape(k)}: {html.escape(v)}" for k, v in state.report["metadata"].items()
-    ]
-    st.html('<div class="chips">' + "".join(f'<span class="chip">{c}</span>' for c in chips) + "</div>")
-    with st.container(height=PANEL_HEIGHT, border=True):
-        findings = state.result["findings"] if state.result else []
-        st.html(report_html(state.report["text"], findings, selected["uid"] if selected else None))
-    if state.result and findings:
-        used = [k for k in LEXICON if any(f["modality"] == k for f in findings)]
-        st.html(
-            '<div class="legend">'
-            + "".join(f'<span><i style="background:{MODALITY_COLORS.get(k, "#e5e7eb")}"></i>{LEXICON[k].name}</span>'
-                      for k in used)
-            + "</div>"
+with settings_col:
+    with st.popover("", icon=":material/settings:", help="Settings"):
+        st.text_input("Annotator name", key="annotator", placeholder="Your name")
+        if "next_output_name" in state:
+            state.output_name = state.pop("next_output_name")
+        state.setdefault("output_name", "annotation")
+        st.text_input("Download file name", key="output_name", help="Saved as <name>.json")
+        if st.button("Re-extract", icon=":material/refresh:", disabled=not state.report,
+                     help="Runs the model again and replaces all corrections."):
+            state.extract_pending = True
+        logo_b64 = base64.b64encode(LOGO.read_bytes()).decode()
+        st.markdown(
+            f'<div class="footer">Made with ❤️ by <img src="data:image/png;base64,{logo_b64}" alt="logo"></div>',
+            unsafe_allow_html=True,
         )
 
-with review_col:
-    if not state.result:
-        with st.container(height=PANEL_HEIGHT + 40, border=True):
-            st.markdown("#### Ready to extract")
-            st.caption("Click **Extract descriptors** in the sidebar. The model reads the report and proposes "
-                       "the exam-level descriptors and one entry per finding, for you to check.")
-    else:
-        st.pills(
-            "Section", options, key=nav_key(), format_func=nav_label, label_visibility="collapsed",
-        )
-        with st.container(height=PANEL_HEIGHT - 20, border=True):
+# ---------- report | findings ----------
+
+report_col, findings_col = st.columns(2, gap="large")
+
+with findings_col:
+    nav = None
+    if state.report and state.get("extract_pending"):
+        state.extract_pending = False
+        run_extraction()  # reruns the app on success, so the report is drawn with its highlights
+    if state.result:
+        options = [NAV_EXAM, *(f"f:{f['uid']}" for f in state.result["findings"]), NAV_ADD]
+        if state.get(nav_key()) is None and state.get("last_nav") in options:
+            state[nav_key()] = state.last_nav  # clicking the selected pill deselects it: keep it selected
+        if state.get(nav_key()) not in options:
+            first = options[1] if len(options) > 2 else NAV_EXAM
+            state[nav_key()] = first
+        nav = state.last_nav = state[nav_key()]
+        st.pills("Findings", options, key=nav_key(), format_func=nav_label, label_visibility="collapsed")
+        with st.container(height=PANEL_HEIGHT, border=True):
             if nav == NAV_EXAM:
                 exam_view()
             elif nav == NAV_ADD:
                 add_view()
             else:
-                finding_view(selected)
+                finding_view(finding_by_nav(nav))
+    elif state.get("extract_error"):
+        st.error(state.extract_error)
+        if st.button("Retry", icon=":material/refresh:"):
+            state.extract_pending = True
+            st.rerun()
+    else:
+        st.caption("Findings appear here after you upload a report.")
+
+selected = finding_by_nav(nav) if nav and nav.startswith("f:") else None
+
+with report_col:
+    uploaded = st.file_uploader("Upload a report (.txt)", type=["txt"], accept_multiple_files=False,
+                                label_visibility="collapsed")
+    if uploaded is not None:
+        if load_report(uploaded):
+            st.rerun()  # extract and draw the findings for the new report
+    elif state.report:
+        clear_report()
+        st.rerun()
+    if state.report:
+        with st.container(height=PANEL_HEIGHT - 40, border=True):
+            if state.report["metadata"]:
+                st.html('<div class="metadata">' + "".join(
+                    f"<span><b>{html.escape(k)}</b> {html.escape(v)}</span>"
+                    for k, v in state.report["metadata"].items()
+                ) + "</div>")
+            findings = state.result["findings"] if state.result else []
+            st.html(report_html(state.report["text"], findings, selected["uid"] if selected else None))
