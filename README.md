@@ -15,7 +15,8 @@ Streamlit app to annotate breast imaging reports with the ACR BI-RADS lexicon.
 - **Right:** the BI-RADS descriptors extracted by the OpenAI API in a single request:
   - **Exam level:** one block per modality in the report, holding only that modality's `Exam_level` descriptors (e.g. breast composition, BPE, assessment category).
   - **Findings:** one finding per finding type present (a mass with skin thickening is two findings), each with a modality, its `Finding_type` descriptors and its `Characteristics` (location). Group items such as Mass show their sub-descriptors (shape, margin, …) only when ticked, and are ticked automatically when a sub-descriptor is filled. Changing a finding's modality re-extracts that finding's descriptors for the new modality.
-  - Negative statements ("No axillary lymphadenopathy") do not create findings.
+  - Negative statements ("No axillary lymphadenopathy") and general tissue descriptions ("fibrocystic changes") do not create findings. Exact duplicate findings are dropped.
+  - Findings and exam-level modalities can be removed or added. A new finding starts empty, or, if you paste the report excerpt it is based on, is highlighted and has its descriptors extracted from that excerpt. Findings are renumbered `F1`, `F2`, … after each change.
 - Every value can be corrected. Descriptors not stated in the report are left empty (`null`, `[]` for multi-value, `false` for Bool).
 - Enter your name, optionally rename the output file, then **Download results (JSON)**.
 

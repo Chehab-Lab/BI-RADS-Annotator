@@ -21,9 +21,11 @@ Do not skip any; completeness matters as much as accuracy.
 - A finding is one abnormality in one imaging modality. When it matches Finding_type items, create a separate finding \
 for each item: e.g. a mass with skin thickening is two findings, one for the mass and one for the skin thickening. \
 Indented descriptors belong to the item above them (e.g. mass shape and margin are part of the mass finding).
-- If an abnormality cannot be mapped to any Finding_type item with certainty (e.g. unspecified "foci" or a "slight \
+- If a lesion cannot be mapped to any Finding_type item with certainty (e.g. unspecified "foci" or a "slight \
 over-opacity"), still create the finding: leave its Finding_type descriptors empty (false for Bool) and fill only \
 what is stated, such as its Characteristics.
+- Do not create findings for general descriptions of the breast tissue (e.g. "fibrous and fibrocystic changes", \
+"involutive changes", "glandular-mixed type", density); they are not lesions and belong at most to the exam level.
 - If the same lesion is described in several modalities, create one finding per modality.
 - If one sentence describes several distinct lesions, create one finding per lesion.
 - Fill the Characteristics (laterality, location, depth, distance from nipple, ...) of each finding from its own text.
@@ -47,7 +49,8 @@ empty even if the ultrasound gave them.
 - Do not fill finding descriptors from the conclusion/impression. The conclusion may only be used for the exam-level \
 assessment_category of the modalities it names.
 - Only use the allowed values. Map wording to a lexicon value only when the meaning is explicitly the same; do not add \
-qualifiers the report does not state (e.g. "peripheral vascularization" is not "peripheral hypervascularity").
+qualifiers the report does not state (e.g. "peripheral vascularization" is not "peripheral hypervascularity"). \
+Calcifications described as "scattered" have the distribution diffuse.
 - Do not infer a lesion type the report does not name (e.g. unspecified "foci" or "opacities" are not calcifications \
 or masses unless stated). This only limits the descriptors: the finding itself must still be extracted.
 - If the wording is ambiguous, contradictory, or would need clinical interpretation, leave the descriptor empty.
@@ -196,15 +199,17 @@ class Extractor:
             for key, raw in (data.get("exam_level") or {}).items()
             if key in self.lexicon and raw is not None
         }
-        findings = [
-            {
+        findings = []
+        for f in data.get("findings") or []:
+            if f.get("modality") not in self.lexicon:
+                continue
+            finding = {
                 "modality": f["modality"],
                 "evidence": [e for e in f.get("evidence", []) if isinstance(e, str) and e.strip()],
                 "descriptors": clean_finding(self.lexicon[f["modality"]], f.get("descriptors")),
             }
-            for f in data.get("findings") or []
-            if f.get("modality") in self.lexicon
-        ]
+            if finding not in findings:  # drop exact duplicates (same modality, excerpts and values)
+                findings.append(finding)
         return {"exam_level": exam_level, "findings": findings}
 
     def extract_finding(self, report, evidence, modality_key):
