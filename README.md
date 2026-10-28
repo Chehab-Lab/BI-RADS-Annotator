@@ -2,23 +2,26 @@
 
 Streamlit app to annotate breast imaging reports with the ACR BI-RADS lexicon.
 
-- **Left:** upload a `.txt` report and read it. An optional metadata header at the top of the file is shown above the report, saved in the JSON under `report.metadata`, and never sent to the model:
+The sidebar walks through the four steps; the report and the review panel sit side by side.
 
-      ---
-      id: BR_0077
-      country: Togo
-      modality: MR
-      ---
-      <report text>
+1. **Report:** upload a `.txt` report. An optional metadata header at the top of the file is shown above the report as chips, saved in the JSON under `report.metadata`, and never sent to the model:
 
-  The text each finding is based on is highlighted and tagged `F1`, `F2`, ….
-- **Right:** the BI-RADS descriptors extracted by the OpenAI API in a single request:
-  - **Exam level:** one block per modality in the report, holding only that modality's `Exam_level` descriptors (e.g. breast composition, BPE, assessment category).
-  - **Findings:** one finding per finding type present (a mass with skin thickening is two findings), each with a modality, its `Finding_type` descriptors and its `Characteristics` (location). Group items such as Mass show their sub-descriptors (shape, margin, …) only when ticked, and are ticked automatically when a sub-descriptor is filled. Changing a finding's modality re-extracts that finding's descriptors for the new modality.
-  - Negative statements ("No axillary lymphadenopathy") and general tissue descriptions ("fibrocystic changes") do not create findings. Exact duplicate findings are dropped.
-  - Findings and exam-level modalities can be removed or added. A new finding starts empty, or, if you paste the report excerpt it is based on, is highlighted and has its descriptors extracted from that excerpt. Findings are renumbered `F1`, `F2`, … after each change.
-- Every value can be corrected. Descriptors not stated in the report are left empty (`null`, `[]` for multi-value, `false` for Bool).
-- Enter your name, optionally rename the output file, then **Download results (JSON)**.
+       ---
+       id: BR_0077
+       country: Togo
+       modality: MR
+       ---
+       <report text>
+
+2. **Extract:** the OpenAI API proposes, in a single request, the exam-level descriptors and the findings. The text each finding is based on is highlighted in the report and tagged `F1`, `F2`, ….
+3. **Review:** the pills above the review panel switch between **Exam level**, each finding and **Add**. One thing is shown at a time; the selected finding's text is outlined in the report and the others are dimmed.
+   - **Exam level:** one block per modality in the report, holding only that modality's `Exam_level` descriptors (e.g. breast composition, BPE, assessment category).
+   - **Findings:** one finding per lesion, with all of its attributes (a mass with associated skin thickening is one finding with both filled). Each finding shows all `Finding_type` descriptors of its modality and its `Characteristics` (location), with a one-line readout of what is filled at the top. Group items such as Mass show their sub-descriptors (shape, margin, …) only when ticked, and are ticked automatically when a sub-descriptor is filled. Changing a finding's modality re-extracts its descriptors for the new modality.
+   - **Mark reviewed & next** moves through the findings; the sidebar shows how many are reviewed (this is a review aid only and is not exported).
+   - Negative statements ("No axillary lymphadenopathy") and general tissue descriptions ("fibrocystic changes") do not create findings. Exact duplicate findings are dropped.
+   - Findings and exam-level modalities can be deleted (with a confirmation) or added. A new finding starts empty, or, if you paste the report excerpt it is based on, is highlighted and has its descriptors extracted from that excerpt. Findings are renumbered `F1`, `F2`, … after each change.
+   - Values are shown in readable form (`Heterogeneously dense`, `10 o'clock`) but exported as lexicon values (`heterogeneously_dense`, `clock_10`). Descriptors not stated in the report are left empty (`null`, `[]` for multi-value, `false` for Bool).
+4. **Download:** enter your name, optionally rename the output file, then **Download JSON**.
 
 ## Run
 

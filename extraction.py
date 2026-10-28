@@ -18,9 +18,10 @@ Findings:
 - Extract EVERY abnormality, lesion or positive observation described in the current imaging (masses, opacities, \
 nodules, foci, calcifications, asymmetries, cysts, duct changes, skin changes, lymph nodes, enhancements, ...). \
 Do not skip any; completeness matters as much as accuracy.
-- A finding is one abnormality in one imaging modality. When it matches Finding_type items, create a separate finding \
-for each item: e.g. a mass with skin thickening is two findings, one for the mass and one for the skin thickening. \
-Indented descriptors belong to the item above them (e.g. mass shape and margin are part of the mass finding).
+- A finding is one lesion in one imaging modality, with all of its attributes. Features described as belonging to \
+or associated with that lesion are part of the same finding: e.g. a mass with associated skin thickening is ONE \
+finding with both mass and skin_thickening filled, not two findings. Create a separate finding only for a separate \
+lesion or abnormality. Indented descriptors belong to the item above them (e.g. mass shape and margin).
 - If a lesion cannot be mapped to any Finding_type item with certainty (e.g. unspecified "foci" or a "slight \
 over-opacity"), still create the finding: leave its Finding_type descriptors empty (false for Bool) and fill only \
 what is stated, such as its Characteristics.
