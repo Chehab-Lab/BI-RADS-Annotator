@@ -67,7 +67,8 @@ def widget_key(scope, variable):
 
 
 def finding_scope(finding):
-    return f"finding:{finding['id']}:{finding['modality']}:{finding['frev']}"
+    # keyed by the stable uid: the displayed id changes when findings are removed
+    return f"finding:{finding['uid']}:{finding['modality']}:{finding['frev']}"
 
 
 def current_value(scope, descriptor, defaults):
@@ -171,7 +172,8 @@ def run_extraction():
         st.error(f"Extraction failed: {error}")
         return
     for i, finding in enumerate(result["findings"], start=1):
-        finding.update(id=i, frev=0, error=None)
+        finding.update(id=i, uid=i, frev=0, error=None)
+    result["next_uid"] = len(result["findings"]) + 1
     result["model"] = ex.model
     state.result = result
     state.rev += 1
@@ -194,6 +196,58 @@ def on_modality_change(finding, key):
         finding["error"] = f"Re-extraction failed: {error}"
 
 
+def renumber_findings():
+    for i, finding in enumerate(state.result["findings"], start=1):
+        finding["id"] = i
+
+
+def remove_finding(uid):
+    state.result["findings"] = [f for f in state.result["findings"] if f["uid"] != uid]
+    renumber_findings()
+
+
+def add_finding(select_key, excerpt_key):
+    """Append a finding; with an excerpt, its descriptors are extracted from it, otherwise left empty."""
+    modality_key = state[select_key]
+    excerpt = state.get(excerpt_key, "").strip()
+    state[excerpt_key] = ""
+    modality = LEXICON[modality_key]
+    finding = {
+        "uid": state.result["next_uid"],
+        "modality": modality_key,
+        "evidence": [excerpt] if excerpt else [],
+        "descriptors": {d.variable: d.empty() for d in modality.finding_descriptors()},
+        "frev": 0,
+        "error": None,
+    }
+    state.result["next_uid"] += 1
+    if excerpt:
+        try:
+            finding["descriptors"] = extractor().extract_finding(state.report["text"], [excerpt], modality_key)
+        except Exception as error:
+            finding["error"] = f"Extraction failed, fill the descriptors manually: {error}"
+    state.result["findings"].append(finding)
+    renumber_findings()
+
+
+def remove_exam(modality_key):
+    state.result["exam_level"].pop(modality_key, None)
+    prefix = widget_key(f"exam:{modality_key}", "")
+    for key in [k for k in state if isinstance(k, str) and k.startswith(prefix)]:
+        del state[key]  # so a modality added back starts empty
+
+
+def add_exam(select_key):
+    modality_key = state.get(select_key)
+    if modality_key and modality_key not in state.result["exam_level"]:
+        state.result["exam_level"][modality_key] = {}
+
+
+def exam_modalities():
+    """Exam-level modality keys present in the result, in lexicon order."""
+    return [k for k in LEXICON if k in state.result["exam_level"]]
+
+
 def export_json(annotator):
     result = state.result
     return {
@@ -209,9 +263,9 @@ def export_json(annotator):
         "exam_level": [
             {
                 "modality": LEXICON[key].name,
-                "descriptors": read_exam(key, f"exam:{key}", defaults),
+                "descriptors": read_exam(key, f"exam:{key}", result["exam_level"][key]),
             }
-            for key, defaults in result["exam_level"].items()
+            for key in exam_modalities()
         ],
         "findings": [
             {
@@ -408,11 +462,27 @@ with annotation_col:
             with exam_tab:
                 if not state.result["exam_level"]:
                     st.caption("No modality-level descriptors were extracted.")
-                for key, defaults in state.result["exam_level"].items():
+                for key in exam_modalities():
                     scope = f"exam:{key}"
+                    defaults = state.result["exam_level"][key]
                     filled = filled_count(read_exam(key, scope, defaults))
                     with st.expander(f"{LEXICON[key].name} · {filled} filled", expanded=True):
                         exam_widgets(key, scope, defaults)
+                        st.button(
+                            "Remove modality", key=f"{state.rev}|remove-exam|{key}",
+                            on_click=remove_exam, args=(key,), icon=":material/delete:",
+                        )
+                missing = [k for k in LEXICON if k not in state.result["exam_level"]]
+                if missing:
+                    select_key = f"{state.rev}|add-exam"
+                    pick_col, add_col = st.columns([3, 1], vertical_alignment="bottom")
+                    with pick_col:
+                        st.selectbox("Add a modality", missing, key=select_key, format_func=lambda k: LEXICON[k].name)
+                    with add_col:
+                        st.button(
+                            "Add", key=f"{state.rev}|add-exam-button", on_click=add_exam, args=(select_key,),
+                            icon=":material/add:", use_container_width=True,
+                        )
             with findings_tab:
                 if not state.result["findings"]:
                     st.caption("No findings were extracted.")
@@ -423,7 +493,7 @@ with annotation_col:
                     with st.expander(f"F{finding['id']} · {name} · {filled_count(values)} filled", expanded=True):
                         for excerpt in finding["evidence"]:
                             st.markdown(f'<div class="evidence">{html.escape(excerpt)}</div>', unsafe_allow_html=True)
-                        modality_key = f"{state.rev}|modality|{finding['id']}"
+                        modality_key = f"{state.rev}|modality|{finding['uid']}"
                         if modality_key not in state:
                             state[modality_key] = finding["modality"]
                         st.selectbox(
@@ -438,6 +508,22 @@ with annotation_col:
                         if finding["error"]:
                             st.error(finding["error"])
                         finding_widgets(finding["modality"], scope, finding["descriptors"])
+                        st.button(
+                            "Remove finding", key=f"{state.rev}|remove-finding|{finding['uid']}",
+                            on_click=remove_finding, args=(finding["uid"],), icon=":material/delete:",
+                        )
+                with st.container(border=True):
+                    st.markdown("**Add a finding**")
+                    modality_key, excerpt_key = f"{state.rev}|add-finding-modality", f"{state.rev}|add-finding-excerpt"
+                    st.selectbox("Modality", list(LEXICON), key=modality_key, format_func=lambda k: LEXICON[k].name)
+                    st.text_area(
+                        "Excerpt (optional)", key=excerpt_key, height=68,
+                        placeholder="Paste the report text it is based on to highlight it and pre-fill the descriptors",
+                    )
+                    st.button(
+                        "Add finding", key=f"{state.rev}|add-finding-button", icon=":material/add:",
+                        on_click=add_finding, args=(modality_key, excerpt_key),
+                    )
 
 logo_b64 = base64.b64encode(LOGO.read_bytes()).decode()
 st.markdown(

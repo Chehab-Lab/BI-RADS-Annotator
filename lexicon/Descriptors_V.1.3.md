@@ -7,6 +7,7 @@ Modified parts:
 - Location in breast (one -> multiple)
 - Location in breast in every modality: variables added to match mammography
 - Implant integrity added in MRI as an independent variable
+- Mammography and CEM: Architectural distortion and Skin lesion (present/absent -> Bool), as negative statements never create findings
 
 ## Mammography
 
@@ -24,11 +25,11 @@ Modified parts:
     Typically benign — `calc_benign_morphology` (multi): skin, vascular, coarse, large_rod_like, round, rim, layering, suture
     Suspicious morphology — `calc_suspicious_morphology` (multi): amorphous, coarse_heterogeneous, fine_pleomorphic, fine_linear_or_branching
     Distribution — `calc_distribution` (one): diffuse, regional, grouped, linear, segmental
-- Architectural distortion — `architectural_distortion` (one): present, absent
+- Architectural distortion — `architectural_distortion` (Bool)
 - Asymmetries — `asymmetry_type` (one): global_asymmetry, asymmetry, focal_asymmetry
 - Intramammary lymph node — `lymph_node_intramammary` (multi): normal, abnormal
 - Axillary lymph node — `lymph_node_axillary` (multi): normal, abnormal
-- Skin lesion — `skin_lesion` (one): present, absent
+- Skin lesion — `skin_lesion` (Bool)
 - Dilated ducts — `dilated_duct` (one): multiple_dilated_ducts, solitary_dilated_duct
 - Skin retraction — `skin_retraction` (Bool)
 - Nipple retraction — `nipple_retraction` (Bool)
@@ -168,7 +169,7 @@ Modified parts:
     Internal enhancement characteristics — `nme_internal_enhancement` (one): homogeneous, heterogeneous, clumped
 - Intramammary lymph node — `intramammary_lymph_node` (one): normal, abnormal
 - Enhancing asymmetry: Internal enhancement pattern — `enhancing_asymmetry_internal_enhancement` (one): homogeneous, heterogeneous 
-- Skin lesion — `skin_lesion` (one): present, absent
+- Skin lesion — `skin_lesion` (Bool)
 - Nipple retraction — `nipple_retraction` (Bool)
 - Nipple involvement — `nipple_involvement` (Bool)
 - Skin retraction — `skin_retraction` (Bool)
