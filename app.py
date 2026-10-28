@@ -91,30 +91,17 @@ def current_value(scope, descriptor, defaults):
     return state[key] if key in state else defaults.get(descriptor.variable, descriptor.empty())
 
 
-def item_key(item):
-    """Option key of a finding-type item (a group or a single descriptor)."""
-    return item.key if isinstance(item, Group) else item.variable
+def group_key(scope, group):
+    return widget_key(scope, group.toggle.variable if group.toggle else f"group:{group.key}")
 
 
-def types_key(scope):
-    return widget_key(scope, "__types")
-
-
-def selected_types(modality, scope, defaults):
-    """Finding-type items ticked for this finding; initially those the model filled."""
-    key = types_key(scope)
+def group_on(scope, group, defaults):
+    key = group_key(scope, group)
     if key in state:
         return state[key]
-    selected = []
-    for item in modality.finding:
-        if isinstance(item, Group):
-            on = bool(defaults.get(item.toggle.variable)) if item.toggle else False
-            on = on or any(d.is_filled(defaults.get(d.variable, d.empty())) for d in item.members)
-        else:
-            on = item.is_filled(defaults.get(item.variable, item.empty()))
-        if on:
-            selected.append(item_key(item))
-    return selected
+    if group.toggle:
+        return bool(defaults.get(group.toggle.variable))
+    return any(d.is_filled(defaults.get(d.variable, d.empty())) for d in group.members)
 
 
 def read_exam(modality_key, scope, defaults):
@@ -123,21 +110,18 @@ def read_exam(modality_key, scope, defaults):
 
 
 def read_finding(modality_key, scope, defaults):
-    """Current finding values; descriptors of finding types that are not ticked are exported empty."""
+    """Current finding values; sub-descriptors of an unticked group are exported empty."""
     modality = LEXICON[modality_key]
-    types = set(selected_types(modality, scope, defaults))
     values = {}
     for item in modality.finding:
-        on = item_key(item) in types
         if isinstance(item, Group):
+            on = group_on(scope, item, defaults)
             if item.toggle:
                 values[item.toggle.variable] = on
             for d in item.members:
                 values[d.variable] = current_value(scope, d, defaults) if on else d.empty()
-        elif item.kind == "bool":
-            values[item.variable] = on
         else:
-            values[item.variable] = current_value(scope, item, defaults) if on else item.empty()
+            values[item.variable] = current_value(scope, item, defaults)
     for d in modality.characteristics:
         values[d.variable] = current_value(scope, d, defaults)
     return values
@@ -411,17 +395,6 @@ def descriptor_grid(scope, descriptors, defaults):
                     descriptor_widget(scope, d, defaults)
 
 
-def type_labels(modality, types):
-    labels = {item_key(item): item.label for item in modality.finding}
-    return [labels[t] for t in types if t in labels]
-
-
-def finding_summary(finding):
-    modality = LEXICON[finding["modality"]]
-    labels = type_labels(modality, selected_types(modality, finding_scope(finding), finding["descriptors"]))
-    return ", ".join(labels) if labels else "Unclassified"
-
-
 def nav_label(option):
     if option == NAV_EXAM:
         return "Exam level"
@@ -429,10 +402,7 @@ def nav_label(option):
         return ":material/add: Add"
     finding = finding_by_nav(option)
     check = ":material/check_circle: " if state.get(reviewed_key(finding)) else ""
-    summary = finding_summary(finding)
-    if len(summary) > 22:
-        summary = summary[:21] + "…"
-    return f"{check}F{finding['id']} · {summary}"
+    return f"{check}F{finding['id']} · {LEXICON[finding['modality']].name}"
 
 
 def finding_by_nav(option):
@@ -502,28 +472,32 @@ def finding_view(finding):
     if finding["error"]:
         st.error(finding["error"])
 
-    # finding type first: only the chosen types show their descriptors
-    key = types_key(scope)
-    if key not in state:
-        state[key] = selected_types(modality, scope, defaults)
-    labels = {item_key(item): item.label for item in modality.finding}
-    st.multiselect(
-        "Finding type", list(labels), key=key, format_func=labels.get,
-        placeholder="What is this finding? (e.g. Mass, Calcification)",
-        help="Only the descriptors of the chosen types are shown and exported.",
-    )
-    chosen = set(state[key])
-    for item in modality.finding:
-        if item_key(item) not in chosen:
-            continue
-        if isinstance(item, Group):
-            with st.container(border=True):
-                st.markdown(f"**{item.label}**")
-                descriptor_grid(scope, item.members, defaults)
-        elif item.kind != "bool":
-            with st.container(border=True):
-                descriptor_widget(scope, item, defaults)
+    values = read_finding(finding["modality"], scope, defaults)
+    filled = [  # a one-line readout of what is filled, to check at a glance
+        f"{d.label}: {', '.join(map(humanize, v)) if isinstance(v, list) else 'yes' if v is True else humanize(v)}"
+        for d in modality.finding_descriptors()
+        if d.is_filled(v := values[d.variable])
+    ]
+    st.html('<div class="chips">' + ("".join(f'<span class="chip">{html.escape(c)}</span>' for c in filled)
+            or '<span class="chip">Nothing filled yet</span>') + "</div>")
 
+    st.markdown("**Descriptors**")
+    pending = []  # consecutive plain descriptors, rendered together
+    for item in [*modality.finding, None]:
+        if isinstance(item, Group) or item is None:
+            descriptor_grid(scope, pending, defaults)
+            pending = []
+        else:
+            pending.append(item)
+            continue
+        if item is None:
+            break
+        key = group_key(scope, item)
+        if key not in state:
+            state[key] = group_on(scope, item, defaults)
+        if st.toggle(item.label, key=key, help=item.toggle.variable if item.toggle else None):
+            with st.container(border=True):
+                descriptor_grid(scope, item.members, defaults)
     st.markdown("**Characteristics**")
     descriptor_grid(scope, modality.characteristics, defaults)
 
